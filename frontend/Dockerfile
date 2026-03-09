@@ -8,7 +8,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # BACKEND_URL is baked into the Next.js routes manifest at build time.
 # Default points to the docker-compose service name "backend".
