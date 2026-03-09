@@ -75,7 +75,7 @@ python app.py --no-reload
    - Wait 15-30 seconds for AI processing
    
 6. **View results:**
-   - AI recommendations appear with similarity scores
+   - Recommendations appear with similarity scores
    - Click "➕ Add to Prescription" for medicines
    - Click "💾 Save Prescription" when done
 
@@ -115,7 +115,7 @@ v1/
 ### All Features Functional:
 ✅ Patient management (add, edit, view)
 ✅ Browser audio recording (MediaRecorder API)
-✅ **Whisper AI transcription (FIXED!)**
+✅ **Gemini 2.5 Flash transcription (if `GEMINI_API_KEY` is configured) — otherwise local Whisper fallback**
 ✅ Gemini AI EHR extraction
 ✅ Medicine recommendations (55 medicines)
 ✅ Manual medicine search
@@ -178,7 +178,7 @@ When everything works, you'll see:
    INFO - Audio file saved: data/temp_audio\...
    INFO - Session directory created: data\sessions\...
    INFO - Starting transcription...
-   INFO - Loading Whisper model...
+   INFO - Using Gemini API for transcription (gemini-2.5-flash) (if configured)
    INFO - Transcribing audio file: ...
    INFO - Transcript saved successfully to: ...
    INFO - Extracting EHR data with AI...
@@ -188,7 +188,7 @@ When everything works, you'll see:
 
 3. **In browser:**
    - Status shows: ✓ Processing complete!
-   - AI recommendations appear with scores
+   - Recommendations appear with scores
    - Can add to prescription and save
 
 ---

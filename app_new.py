@@ -4,6 +4,7 @@ Main patient dashboard and management interface
 """
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask_cors import CORS
 from modules.database_module import MedicineDatabase
 # Lazy import for heavy AI modules to speed up startup
 # from modules import transcription_engine, ehr_autofill, recommendation_module
@@ -157,6 +158,7 @@ def get_learning_history():
 
 # Initialize Flask application
 app = Flask(__name__)
+CORS(app) # Enable CORS for all routes
 app.secret_key = 'your-secret-key-here-change-in-production'  # Required for flash messages
 
 # Configure file upload settings
@@ -205,6 +207,110 @@ def dashboard():
     
     # Render the dashboard template with patient data
     return render_template('dashboard.html', patients=patients)
+
+
+# ============================================================================
+# JSON API ENDPOINTS FOR NEXT.JS FRONTEND
+# ============================================================================
+
+@app.route('/api/patients', methods=['GET'])
+def api_get_patients():
+    """
+    API: Get All Patients (JSON)
+    
+    Returns a JSON list of all patients for the Next.js frontend.
+    """
+    logger.info("API: Fetching all patients")
+    
+    try:
+        patients = get_db().get_all_patients()
+        
+        # Convert to list of dicts with all relevant fields
+        patients_list = []
+        for p in patients:
+            patients_list.append({
+                'patient_id': p.get('patient_id', ''),
+                'full_name': p.get('full_name', ''),
+                'date_of_birth': p.get('date_of_birth', ''),
+                'gender': p.get('gender', ''),
+                'contact_info': p.get('contact_info', ''),
+                'insurance_info': p.get('insurance_info', ''),
+                'ehr_data': p.get('ehr_data', '{}'),
+            })
+        
+        logger.info(f"API: Retrieved {len(patients_list)} patients")
+        
+        return jsonify({
+            'success': True,
+            'patients': patients_list,
+            'count': len(patients_list)
+        })
+    except Exception as e:
+        logger.error(f"API Error getting patients: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/patient/<patient_id>', methods=['GET'])
+def api_get_patient(patient_id):
+    """
+    API: Get Single Patient (JSON)
+    
+    Returns detailed information for a specific patient.
+    """
+    logger.info(f"API: Fetching patient {patient_id}")
+    
+    try:
+        patient = get_db().get_patient(patient_id)
+        
+        if not patient:
+            return jsonify({'success': False, 'error': 'Patient not found'}), 404
+        
+        patient_data = {
+            'patient_id': patient.get('patient_id', ''),
+            'full_name': patient.get('full_name', ''),
+            'date_of_birth': patient.get('date_of_birth', ''),
+            'gender': patient.get('gender', ''),
+            'contact_info': patient.get('contact_info', ''),
+            'insurance_info': patient.get('insurance_info', ''),
+            'ehr_data': patient.get('ehr_data', '{}'),
+        }
+        
+        return jsonify(patient_data)
+    except Exception as e:
+        logger.error(f"API Error getting patient: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/medicines', methods=['GET'])
+def api_get_medicines():
+    """
+    API: Get All Medicines (JSON)
+    
+    Returns a JSON list of all medicines for the Next.js frontend.
+    """
+    logger.info("API: Fetching all medicines")
+    
+    try:
+        db = get_db()
+        medicines = db.get_all_medicines()
+        
+        medicines_list = []
+        for m in medicines:
+            medicines_list.append({
+                'id': m.get('id', 0),
+                'name': m.get('name', ''),
+                'description': m.get('description', ''),
+                'stock_level': m.get('stock_level', 0),
+            })
+        
+        return jsonify({
+            'success': True,
+            'medicines': medicines_list,
+            'count': len(medicines_list)
+        })
+    except Exception as e:
+        logger.error(f"API Error getting medicines: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/new_patient', methods=['GET', 'POST'])
@@ -294,13 +400,17 @@ def process_consultation_v2(patient_id):
             logger.info("Transcribing audio...")
             transcription_engine = get_transcription_engine()
             # Note: We pass output_dir to ensure we know where it saves
-            transcript_path = transcription_engine.transcribe_conversation(
-                filepath, patient_id, "DOC001", output_dir=os.path.join('data', 'sessions', patient_id, 'transcripts')
-            )
-            
+            try:
+                transcript_path = transcription_engine.transcribe_conversation(
+                    filepath, patient_id, "DOC001", output_dir=os.path.join('data', 'sessions', patient_id, 'transcripts')
+                )
+            except Exception as te:
+                logger.error(f"Transcription raised exception: {te}", exc_info=True)
+                transcript_path = None
+
             if not transcript_path:
-                logger.error("Transcription failed")
-                return jsonify({'success': False, 'error': 'Transcription failed'}), 500
+                logger.error("Transcription returned no result – check transcription_engine logs above for details")
+                return jsonify({'success': False, 'error': 'Transcription failed. Check server logs for details.'}), 500
             logger.info(f"Transcription saved to: {transcript_path}")
             
             # Step 3: Read transcript and Update EHR
@@ -352,7 +462,7 @@ def process_consultation_v2(patient_id):
                 db.update_patient_ehr(patient_id, updated_ehr_str)
             # --- Auto-Fill EHR Logic End ---
             
-            # Step 4: Generate HYBRID AI recommendations
+            # Step 4: Generate HYBRID Recommendations
             all_medicines = db.get_all_medicines()
             
             ensemble = get_ensemble_recommender()
@@ -402,6 +512,7 @@ def process_consultation_v2(patient_id):
                 'debug_marker': 'V2_ROUTE_ACTIVE',
                 'patient_id': patient_id,
                 'recommendations': formatted_recs,
+                'transcript': symptoms_text,
                 'transcript_path': transcript_path,
                 'weights': ensemble.get_model_weights(),
                 'message': 'Consultation processed successfully (V2)'

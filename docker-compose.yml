@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # ── Flask Backend ──────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: abhijeet17o/clinical-ip-backend:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      # Persist the SQLite database on the host so data survives container rebuilds
+      - ./pharmacy.db:/app/pharmacy.db
+      # Persist generated session transcripts and uploaded audio
+      - sessions_data:/app/data/sessions
+      - temp_audio:/app/data/temp_audio
+    env_file:
+      # Create a .env file with GEMINI_API_KEY (see .env.example)
+      - .env
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+
+  # ── Next.js Frontend ───────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Tell Next.js to proxy API calls to the "backend" service
+        BACKEND_URL: http://backend:5000
+    image: abhijeet17o/clinical-ip-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# Named volumes for runtime-generated data
+volumes:
+  sessions_data:
+  temp_audio:

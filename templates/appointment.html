@@ -643,11 +643,11 @@
                                 based on your selections</small>
                         </div>
 
-                        <!-- AI Recommendations -->
+                        <!-- Recommendations -->
                         <div class="ai-recommendations">
-                            <h3>🤖 Hybrid AI Recommendations</h3>
+                            <h3>🤖 Hybrid Recommendations</h3>
                             <div class="ai-recommendations-content" id="ai-recommendations">
-                                AI recommendations will appear here after consultation recording is processed
+                                Recommendations will appear here after consultation recording is processed
                             </div>
                         </div>
 
@@ -1010,9 +1010,9 @@
                         // Clear prescription text area
                         prescriptionTextArea.value = '';
 
-                        // Clear search results and AI recommendations
+                        // Clear search results and Recommendations
                         searchResults.innerHTML = '';
-                        document.getElementById('ai-recommendations').innerHTML = 'AI recommendations will appear here after consultation recording is processed';
+                        document.getElementById('ai-recommendations').innerHTML = 'Recommendations will appear here after consultation recording is processed';
 
                         // Clear consultation ID after saving
                         currentConsultationId = null;
@@ -1432,7 +1432,7 @@ ${consultation.transcript_text || 'No transcript available'}
                     console.log('✓ Consultation ID stored:', currentConsultationId);
 
                     // Update status
-                    statusMessage.textContent = '✓ Processing complete! AI recommendations generated';
+                    statusMessage.textContent = '✓ Processing complete! Recommendations generated';
                     statusMessage.parentElement.style.background = '#d4edda';
                     statusMessage.parentElement.style.borderColor = '#c3e6cb';
                     statusMessage.parentElement.style.color = '#155724';
@@ -1473,7 +1473,7 @@ ${consultation.transcript_text || 'No transcript available'}
             }
         }
 
-        // Display AI Recommendations with voting and explanations
+        // Display Recommendations with voting and explanations
         function displayRecommendations(recommendations) {
             console.log("RAW RECOMMENDATIONS DATA:", JSON.stringify(recommendations, null, 2));
 

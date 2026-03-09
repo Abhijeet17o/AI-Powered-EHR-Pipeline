@@ -13,7 +13,11 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .recommenders.base_recommender import BaseRecommender
-from .recommenders.semantic_recommender import SemanticRecommender
+try:
+    from .recommenders.semantic_recommender import SemanticRecommender
+except Exception as _sem_err:
+    SemanticRecommender = None
+    logging.getLogger(__name__).warning(f"SemanticRecommender disabled: {_sem_err}")
 from .recommenders.tfidf_recommender import TfidfRecommender
 from .recommenders.knowledge_recommender import KnowledgeRecommender
 from .recommenders.collaborative_recommender import CollaborativeRecommender
@@ -60,9 +64,14 @@ class EnsembleRecommender:
         self.parallel = parallel_execution
         self.use_learnable_weights = use_learnable_weights
         
-        # Initialize all recommenders
-        self.recommenders: List[BaseRecommender] = [
-            SemanticRecommender(),
+        # Initialize all recommenders (SemanticRecommender is optional)
+        self.recommenders: List[BaseRecommender] = []
+        if SemanticRecommender is not None:
+            try:
+                self.recommenders.append(SemanticRecommender())
+            except Exception as e:
+                logger.warning(f"Could not initialize SemanticRecommender: {e}")
+        self.recommenders += [
             TfidfRecommender(),
             KnowledgeRecommender(),
             CollaborativeRecommender(db_connection=db_connection)

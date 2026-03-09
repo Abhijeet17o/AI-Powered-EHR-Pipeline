@@ -1,0 +1,54 @@
+# Git history
+.git/
+.gitignore
+
+# Frontend is built in its own Dockerfile
+frontend/
+
+# Bundled ffmpeg – we install via apt in the container
+ffmpeg/
+
+# Runtime-generated data (mounted as volumes)
+data/sessions/
+data/temp_audio/
+data/fl_simulation_results.json
+
+# Audio files
+*.wav
+*.mp3
+*.ogg
+*.webm
+
+# Python cache
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Secrets (pass via env_file or -e flag)
+.env
+
+# Development / debug artefacts
+debug_output*.txt
+inspect_*.txt
+research_paper*.txt
+research_paper*.json
+scripts/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docs
+*.md

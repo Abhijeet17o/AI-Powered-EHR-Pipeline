@@ -7,11 +7,20 @@ patient symptoms with medicine descriptions.
 
 import numpy as np
 from typing import List, Dict
-from sentence_transformers import SentenceTransformer
 from scipy.spatial.distance import cosine
 import logging
 
 from .base_recommender import BaseRecommender
+
+try:
+    from sentence_transformers import SentenceTransformer
+    _SENTENCE_TRANSFORMERS_AVAILABLE = True
+except Exception as _st_import_error:
+    SentenceTransformer = None
+    _SENTENCE_TRANSFORMERS_AVAILABLE = False
+    logging.getLogger(__name__).warning(
+        f"sentence_transformers unavailable (SemanticRecommender disabled): {_st_import_error}"
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +40,8 @@ class SemanticRecommender(BaseRecommender):
         Args:
             model_name: Name of the SentenceTransformer model to use
         """
+        if not _SENTENCE_TRANSFORMERS_AVAILABLE:
+            raise ImportError("sentence_transformers is not available; SemanticRecommender cannot be used.")
         self.model_name = model_name
         self._model = None  # Lazy loading
         

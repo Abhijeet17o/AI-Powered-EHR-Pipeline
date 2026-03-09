@@ -4,11 +4,71 @@ This module transcribes doctor-patient conversations using OpenAI's Whisper mode
 and saves the transcript to a structured JSON file.
 """
 
-import whisper
+import base64
+import contextlib
+import io
 import json
-from datetime import datetime
 import os
 import logging
+from datetime import datetime
+
+# Try to import Gemini client (google.generativeai); if not available we'll fall back to local Whisper
+try:
+    import google.generativeai as genai
+    _HAS_GEMINI = True
+except Exception:
+    _HAS_GEMINI = False
+
+_USE_GEMINI = bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')) and _HAS_GEMINI
+
+# Attempt to import local Whisper for fallback (optional) regardless of Gemini availability
+try:
+    import whisper
+except Exception:
+    whisper = None
+
+# Cache the loaded Whisper model so it is only loaded once per process
+_whisper_model = None
+
+
+def _get_whisper_model():
+    """Return a cached Whisper 'base' model, loading it only on first call."""
+    global _whisper_model
+    if _whisper_model is None:
+        logger.info("Loading Whisper model (first call)...")
+        _whisper_model = whisper.load_model("base")
+    return _whisper_model
+
+
+_AUDIO_MAGIC = [
+    (b'\x1a\x45\xdf\xa3', 'audio/webm'),   # WebM / MKV
+    (b'OggS',              'audio/ogg'),
+    (b'RIFF',              'audio/wav'),    # WAV – checked further below
+    (b'ID3',               'audio/mpeg'),  # MP3 with ID3 tag
+    (b'\xff\xfb',          'audio/mpeg'),  # MP3 without tag
+    (b'\xff\xf3',          'audio/mpeg'),
+    (b'\xff\xf2',          'audio/mpeg'),
+]
+
+
+def _detect_audio_mime_type(file_path: str) -> str:
+    """Detect audio MIME type from file header bytes."""
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(16)
+        for magic, mime in _AUDIO_MAGIC:
+            if header[:len(magic)] == magic:
+                # WAV: confirm WAVE marker at offset 8
+                if mime == 'audio/wav' and header[8:12] != b'WAVE':
+                    continue
+                return mime
+        # M4A / AAC container
+        if header[4:8] == b'ftyp':
+            return 'audio/mp4'
+    except Exception:
+        pass
+    return 'audio/webm'  # safe default – browser MediaRecorder default
+
 
 # Configure logging
 logging.basicConfig(
@@ -63,14 +123,141 @@ def transcribe_conversation(audio_file_path, patient_id, doctor_id, output_dir=N
             raise FileNotFoundError(error_msg)
         
         logger.info(f"Starting transcription for patient: {patient_id}")
-        logger.info(f"Loading Whisper model...")
-        
-        # Load Whisper model (using 'base' model for balance of speed and accuracy)
-        model = whisper.load_model("base")
-        
-        logger.info(f"Transcribing audio file: {audio_file_path}")
-        # Transcribe the audio file
-        result = model.transcribe(audio_file_path)
+
+        # If Gemini API key is present and client available, use Gemini for transcription
+        if _USE_GEMINI:
+            api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+
+            # Configure the genai library (preferred) and create a GenerativeModel
+            try:
+                genai.configure(api_key=api_key)
+            except Exception as e:
+                logger.debug(f"genai.configure not available or failed: {e}")
+
+            logger.info("Using Gemini API for transcription (gemini-2.5-flash)")
+
+            # Build a concise transcription prompt (multilingual-aware)
+            prompt = (
+                "Transcribe this audio accurately. "
+                "If multiple speakers are present, indicate speaker turns as Speaker 1/2 if possible. "
+                "Return only the transcript text."
+            )
+
+            # Upload the audio (best-effort) using genai helper.
+            # Suppress genai's internal gRPC stdout noise during the upload.
+            uploaded = None
+            _stdout_buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(_stdout_buf):
+                    try:
+                        uploaded = genai.upload_file(audio_file_path)
+                    except Exception:
+                        uploaded = genai.upload_file(path=audio_file_path)
+                logger.info("Uploaded audio to Gemini Files API")
+            except Exception as e:
+                logger.warning(f"Could not upload audio via genai.upload_file: {e}")
+                uploaded = None
+
+            # Create the model object using the installed genai API
+            try:
+                model = genai.GenerativeModel('gemini-2.5-flash')
+            except Exception as e:
+                logger.error(f"GenerativeModel API unavailable: {e}")
+                model = None
+
+            # Prepare contents: prompt + uploaded object.
+            # When upload fails, skip the raw-bytes Gemini path entirely and
+            # fall through to the reliable local Whisper fallback instead.
+            if uploaded is None:
+                logger.info("Gemini upload failed – using local Whisper directly")
+                if whisper is None:
+                    raise RuntimeError("Gemini upload failed and Whisper is not installed")
+                result = _get_whisper_model().transcribe(audio_file_path)
+            else:
+                contents = [prompt, uploaded]
+
+            # Build a GenerationConfig when available for deterministic transcription
+            if uploaded is not None:
+              gen_cfg = None
+              try:
+                  gen_cfg = genai.GenerationConfig(temperature=0.0, max_output_tokens=32768)
+              except Exception:
+                  try:
+                      from google.generativeai import GenerationConfig
+                      gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=32768)
+                  except Exception:
+                      gen_cfg = None
+
+              # Call the model and robustly parse results
+              try:
+                if model is not None:
+                    _stdout_buf2 = io.StringIO()
+                    with contextlib.redirect_stdout(_stdout_buf2):
+                        if gen_cfg is not None:
+                            response = model.generate_content(contents=contents, generation_config=gen_cfg)
+                        else:
+                            response = model.generate_content(contents=contents)
+                else:
+                    # As a last resort, try older client-based API if present
+                    try:
+                        client = genai.Client(api_key=api_key)
+                        _stdout_buf3 = io.StringIO()
+                        with contextlib.redirect_stdout(_stdout_buf3):
+                            if gen_cfg is not None:
+                                response = client.models.generate_content(model='gemini-2.5-flash', contents=contents, generation_config=gen_cfg)
+                            else:
+                                response = client.models.generate_content(model='gemini-2.5-flash', contents=contents)
+                    except Exception as e:
+                        logger.error(f"No viable Gemini model call path: {e}")
+                        raise
+
+                # Extract transcript text from many possible response shapes
+                transcript_text = None
+                # simple attributes
+                transcript_text = getattr(response, 'text', None) or getattr(response, 'output', None)
+                # candidates list (common in some genai returns)
+                if not transcript_text and hasattr(response, 'candidates'):
+                    try:
+                        transcript_text = response.candidates[0].content if response.candidates else None
+                    except Exception:
+                        transcript_text = None
+                # nested dict forms
+                if not transcript_text and isinstance(response, dict):
+                    transcript_text = response.get('text') or response.get('output')
+                    # some responses wrap candidates
+                    if not transcript_text and 'candidates' in response:
+                        try:
+                            transcript_text = response['candidates'][0].get('content')
+                        except Exception:
+                            pass
+
+                # Normalize to string
+                transcript_text = (transcript_text or "").strip()
+
+                if transcript_text:
+                    logger.info("Gemini returned transcript text")
+                    result = {"text": transcript_text}
+                else:
+                    logger.warning("Gemini returned no transcript text; falling back to Whisper")
+                    raise RuntimeError("Empty transcript from Gemini")
+
+              except Exception as e:
+                logger.error(f"Gemini generate_content failed: {e}", exc_info=True)
+                logger.info("Falling back to local Whisper transcription")
+                if whisper is None:
+                    raise
+                try:
+                    result = _get_whisper_model().transcribe(audio_file_path)
+                except Exception as we:
+                    logger.error(f"Whisper fallback also failed: {we}", exc_info=True)
+                    raise
+
+        else:
+            if whisper is None:
+                raise RuntimeError("Whisper is not installed and no Gemini API key found")
+
+            logger.info(f"Transcribing audio with Whisper: {audio_file_path}")
+            result = _get_whisper_model().transcribe(audio_file_path)
         
         # Get current timestamp in ISO 8601 format
         conversation_timestamp = datetime.now().isoformat()
@@ -80,7 +267,7 @@ def transcribe_conversation(audio_file_path, patient_id, doctor_id, output_dir=N
             "patient_id": patient_id,
             "doctor_id": doctor_id,
             "conversation_timestamp": conversation_timestamp,
-            "transcript": result["text"]
+            "transcript": result.get("text") if isinstance(result, dict) else (result["text"] if isinstance(result, dict) else result)
         }
         
         # Create filename with patient_id and timestamp (safe for filesystems)

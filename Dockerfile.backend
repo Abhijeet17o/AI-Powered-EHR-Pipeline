@@ -1,0 +1,42 @@
+# ============================================================
+# Clinical Intelligence Platform - Backend (Flask)
+# ============================================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System dependencies (ffmpeg for audio + build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyTorch CPU-only FIRST to avoid pulling the large CUDA build
+# (satisfies torch>=2.0.0 in requirements.txt without CUDA overhead)
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Install gunicorn (production WSGI server) + remaining dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir gunicorn -r requirements.txt
+
+# Copy application source
+COPY app_new.py .
+COPY modules/ ./modules/
+COPY templates/ ./templates/
+COPY static/ ./static/
+
+# Copy pre-seeded database and ML model weights
+COPY pharmacy.db .
+COPY data/ ./data/
+
+# Ensure runtime directories exist
+RUN mkdir -p data/sessions data/temp_audio
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:5000/api/patients || exit 1
+
+# Run with gunicorn (single process, multi-threaded – safe for SQLite + background threads)
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "300", "app_new:app"]
