@@ -1452,14 +1452,20 @@ def get_learning_stats():
     """
     try:
         history = get_learning_history()
-        learner = get_incremental_learner()
         
         stats = history.get_stats()
         recent_events = history.get_recent_events(limit=10)
         today_events = history.get_today_events()
         weight_evolution = history.get_weight_evolution()
         learning_rate = history.get_learning_rate()
-        current_weights = learner.get_current_weights()
+        
+        # Read current weights directly from file to avoid loading the heavy EnsembleRecommender
+        try:
+            weights_path = os.path.join('data', 'ensemble_weights.json')
+            with open(weights_path) as f:
+                current_weights = json.load(f)
+        except Exception:
+            current_weights = {}
         
         return jsonify({
             'success': True,
@@ -1558,12 +1564,12 @@ def hybrid_recommend(patient_id):
 if __name__ == '__main__':
     import sys
     
-    # Check if --no-reload flag is passed
-    use_reloader = '--no-reload' not in sys.argv
+    # Reloader is OFF by default because the watchdog can trigger false restarts
+    # on cold start (e.g. pandas numexpr detection).  Pass --reload to enable it.
+    use_reloader = '--reload' in sys.argv
     
-    if not use_reloader:
-        print("⚠️  Auto-reload disabled for AI processing")
-        sys.argv.remove('--no-reload')
+    if use_reloader:
+        print("⚠️  Auto-reload enabled")
     
     # Run the Flask development server
     app.run(debug=True, host='127.0.0.1', port=5000, use_reloader=use_reloader)

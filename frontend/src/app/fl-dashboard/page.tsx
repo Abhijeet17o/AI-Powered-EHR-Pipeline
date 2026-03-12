@@ -157,11 +157,7 @@ export default function FLDashboardPage() {
 
 
 
-    useEffect(() => {
-        loadStats();
-        const interval = setInterval(loadStats, 10000); // Refresh every 10s
-        return () => clearInterval(interval);
-    }, []);
+    const retryCountRef = useRef(0);
 
     const loadStats = async () => {
         try {
@@ -169,13 +165,26 @@ export default function FLDashboardPage() {
             if (data.success) {
                 setStats(data.stats);
                 setRecentEvents(data.recent_events || []);
+                retryCountRef.current = 0; // reset on success
             }
             setLoading(false);
         } catch (err) {
-            setError("Failed to load learning stats");
-            setLoading(false);
+            retryCountRef.current += 1;
+            if (retryCountRef.current <= 3) {
+                // Auto-retry silently for the first 3 failures (backend may still be starting up)
+                setTimeout(loadStats, 3000);
+            } else {
+                setError("Failed to load learning stats");
+                setLoading(false);
+            }
         }
     };
+
+    useEffect(() => {
+        loadStats();
+        const interval = setInterval(loadStats, 10000); // Refresh every 10s
+        return () => clearInterval(interval);
+    }, []);
 
     const getTimeAgo = (timestamp: string) => {
         const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
@@ -205,7 +214,7 @@ export default function FLDashboardPage() {
             {error && (
                 <div className="card" style={{ borderColor: "var(--error)", marginBottom: "1.5rem" }}>
                     <p style={{ color: "var(--error)", display: "flex", gap: "0.5rem", alignItems: "center" }}><WarningIcon />{error}</p>
-                    <button onClick={loadStats} className="btn btn-secondary" style={{ marginTop: "1rem" }}>
+                    <button onClick={() => { retryCountRef.current = 0; setError(null); setLoading(true); loadStats(); }} className="btn btn-secondary" style={{ marginTop: "1rem" }}>
                         <RefreshIcon className="inline mr-2" /> Retry
                     </button>
                 </div>
